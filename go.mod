@@ -10,7 +10,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/go-redis/redis v6.15.7+incompatible
 	github.com/golang/protobuf v1.3.4 // indirect
-	github.com/gomodule/redigo v2.0.0+incompatible
+	github.com/gomodule/redigo v1.8.1
 	github.com/google/uuid v1.1.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/klauspost/compress v1.10.2 // indirect
@@ -19,7 +19,7 @@ require (
 	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pkg/errors v0.9.1
 	github.com/streadway/amqp v0.0.0-20200108173154-1c71cc93ed71
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.5.1
 	github.com/stvp/tempredis v0.0.0-20181119212430-b82af8480203 // indirect
 	github.com/urfave/cli v1.22.2
 	github.com/xdg/stringprep v1.0.0 // indirect

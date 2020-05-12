@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/tls"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -148,6 +149,9 @@ type RedisConfig struct {
 
 	// MasterName specifies a redis master name in order to configure a sentinel-backed redis FailoverClient
 	MasterName string `yaml:"master_name" envconfig:"REDIS_MASTER_NAME"`
+
+	// Dialer specifies custom dialer function to connect to redis, only redigo takes effect now
+	Dialer func(string, string) (net.Conn, error)
 }
 
 // GCPPubSubConfig wraps GCP PubSub related configuration

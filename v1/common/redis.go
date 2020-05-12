@@ -78,6 +78,10 @@ func (rc *RedisConnector) open(socketPath, host, password string, db int, cnf *c
 		opts = append(opts, redis.DialPassword(password))
 	}
 
+	if cnf.Dialer != nil {
+		opts = append(opts, redis.DialNetDial(cnf.Dialer))
+	}
+
 	if socketPath != "" {
 		return redis.Dial("unix", socketPath, opts...)
 	}
