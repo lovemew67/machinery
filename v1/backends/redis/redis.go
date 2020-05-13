@@ -60,6 +60,7 @@ func (b *Backend) InitGroup(groupUUID string, taskUUIDs []string) error {
 
 	metric.BackendConnUsage.WithLabelValues("InitGroup", groupUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("InitGroup", groupUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("InitGroup", groupUUID)
 
 	_, err = conn.Do("SET", groupUUID, encoded)
 	if err != nil {
@@ -111,6 +112,7 @@ func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
 
 	metric.BackendConnUsage.WithLabelValues("TriggerChord", groupUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("TriggerChord", groupUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("TriggerChord", groupUUID)
 
 	m := b.redsync.NewMutex("TriggerChordMutex")
 	if err := m.Lock(); err != nil {
@@ -201,6 +203,7 @@ func (b *Backend) GetState(taskUUID string) (*tasks.TaskState, error) {
 
 	metric.BackendConnUsage.WithLabelValues("GetState", taskUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("GetState", taskUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("GetState", taskUUID)
 
 	item, err := redis.Bytes(conn.Do("GET", taskUUID))
 	if err != nil {
@@ -223,6 +226,7 @@ func (b *Backend) PurgeState(taskUUID string) error {
 
 	metric.BackendConnUsage.WithLabelValues("PurgeState", taskUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("PurgeState", taskUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("PurgeState", taskUUID)
 
 	_, err := conn.Do("DEL", taskUUID)
 	if err != nil {
@@ -239,6 +243,7 @@ func (b *Backend) PurgeGroupMeta(groupUUID string) error {
 
 	metric.BackendConnUsage.WithLabelValues("PurgeGroupMeta", groupUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("PurgeGroupMeta", groupUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("PurgeGroupMeta", groupUUID)
 
 	_, err := conn.Do("DEL", groupUUID)
 	if err != nil {
@@ -255,6 +260,7 @@ func (b *Backend) getGroupMeta(groupUUID string) (*tasks.GroupMeta, error) {
 
 	metric.BackendConnUsage.WithLabelValues("getGroupMeta", groupUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("getGroupMeta", groupUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("getGroupMeta", groupUUID)
 
 	item, err := redis.Bytes(conn.Do("GET", groupUUID))
 	if err != nil {
@@ -280,6 +286,7 @@ func (b *Backend) getStates(taskUUIDs ...string) ([]*tasks.TaskState, error) {
 
 	metric.BackendConnUsage.WithLabelValues("getStates", taskUUIDs[0]).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("getStates", taskUUIDs[0]).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("getStates", taskUUIDs[0])
 
 	// conn.Do requires []interface{}... can't pass []string unfortunately
 	taskUUIDInterfaces := make([]interface{}, len(taskUUIDs))
@@ -319,6 +326,7 @@ func (b *Backend) updateState(taskState *tasks.TaskState) error {
 
 	metric.BackendConnUsage.WithLabelValues("updateState", taskState.TaskUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("updateState", taskState.TaskUUID).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("updateState", taskState.TaskUUID)
 
 	encoded, err := json.Marshal(taskState)
 	if err != nil {
@@ -347,6 +355,7 @@ func (b *Backend) setExpirationTime(key string) error {
 
 	metric.BackendConnUsage.WithLabelValues("setExpirationTime", key).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("setExpirationTime", key).Dec()
+	defer metric.BackendConnUsage.DeleteLabelValues("setExpirationTime", key)
 
 	_, err := conn.Do("EXPIREAT", key, expirationTimestamp)
 	if err != nil {
