@@ -13,6 +13,7 @@ import (
 	"github.com/RichardKnop/machinery/v1/common"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/log"
+	"github.com/RichardKnop/machinery/v1/metric"
 	"github.com/RichardKnop/machinery/v1/tasks"
 	"github.com/RichardKnop/redsync"
 	"github.com/gomodule/redigo/redis"
@@ -61,6 +62,9 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BrokerConnUsage.WithLabelValues("StartConsuming", consumerTag).Inc()
+	defer metric.BrokerConnUsage.WithLabelValues("StartConsuming", consumerTag).Dec()
 
 	// Ping the server to make sure connection is live
 	_, err := conn.Do("PING")
@@ -180,6 +184,9 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 	conn := b.open()
 	defer conn.Close()
 
+	metric.BrokerConnUsage.WithLabelValues("Publish", signature.UUID).Inc()
+	defer metric.BrokerConnUsage.WithLabelValues("Publish", signature.UUID).Dec()
+
 	// Check the ETA signature field, if it is set and it is in the future,
 	// delay the task
 	if signature.ETA != nil {
@@ -200,6 +207,9 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) error 
 func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BrokerConnUsage.WithLabelValues("GetPendingTasks", queue).Inc()
+	defer metric.BrokerConnUsage.WithLabelValues("GetPendingTasks", queue).Dec()
 
 	if queue == "" {
 		queue = b.GetConfig().DefaultQueue
@@ -230,6 +240,9 @@ func (b *Broker) GetPendingTasks(queue string) ([]*tasks.Signature, error) {
 func (b *Broker) GetDelayedTasks() ([]*tasks.Signature, error) {
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BrokerConnUsage.WithLabelValues("GetDelayedTasks", "N/A").Inc()
+	defer metric.BrokerConnUsage.WithLabelValues("GetDelayedTasks", "N/A").Dec()
 
 	dataBytes, err := conn.Do("ZRANGE", redisDelayedTasksKey, 0, -1)
 	if err != nil {
@@ -319,6 +332,9 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 		conn := b.open()
 		defer conn.Close()
 
+		metric.BrokerConnUsage.WithLabelValues("consumeOne", taskProcessor.CustomQueue()).Inc()
+		defer metric.BrokerConnUsage.WithLabelValues("consumeOne", taskProcessor.CustomQueue()).Dec()
+
 		conn.Do("RPUSH", getQueue(b.GetConfig(), taskProcessor), delivery)
 		return nil
 	}
@@ -332,6 +348,9 @@ func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) 
 func (b *Broker) nextTask(queue string) (result []byte, err error) {
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BrokerConnUsage.WithLabelValues("nextTask", queue).Inc()
+	defer metric.BrokerConnUsage.WithLabelValues("nextTask", queue).Dec()
 
 	pollPeriodMilliseconds := 1000 // default poll period for normal tasks
 	if b.GetConfig().Redis != nil {
@@ -363,6 +382,9 @@ func (b *Broker) nextTask(queue string) (result []byte, err error) {
 func (b *Broker) nextDelayedTask(key string) (result []byte, err error) {
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BrokerConnUsage.WithLabelValues("nextDelayedTask", key).Inc()
+	defer metric.BrokerConnUsage.WithLabelValues("nextDelayedTask", key).Dec()
 
 	defer func() {
 		// Return connection to normal state on error.

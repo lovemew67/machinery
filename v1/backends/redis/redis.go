@@ -11,6 +11,7 @@ import (
 	"github.com/RichardKnop/machinery/v1/common"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/log"
+	"github.com/RichardKnop/machinery/v1/metric"
 	"github.com/RichardKnop/machinery/v1/tasks"
 	"github.com/RichardKnop/redsync"
 	"github.com/gomodule/redigo/redis"
@@ -56,6 +57,9 @@ func (b *Backend) InitGroup(groupUUID string, taskUUIDs []string) error {
 
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BackendConnUsage.WithLabelValues("InitGroup", groupUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("InitGroup", groupUUID).Dec()
 
 	_, err = conn.Do("SET", groupUUID, encoded)
 	if err != nil {
@@ -104,6 +108,9 @@ func (b *Backend) GroupTaskStates(groupUUID string, groupTaskCount int) ([]*task
 func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BackendConnUsage.WithLabelValues("TriggerChord", groupUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("TriggerChord", groupUUID).Dec()
 
 	m := b.redsync.NewMutex("TriggerChordMutex")
 	if err := m.Lock(); err != nil {
@@ -192,6 +199,9 @@ func (b *Backend) GetState(taskUUID string) (*tasks.TaskState, error) {
 	conn := b.open()
 	defer conn.Close()
 
+	metric.BackendConnUsage.WithLabelValues("GetState", taskUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("GetState", taskUUID).Dec()
+
 	item, err := redis.Bytes(conn.Do("GET", taskUUID))
 	if err != nil {
 		return nil, err
@@ -211,6 +221,9 @@ func (b *Backend) PurgeState(taskUUID string) error {
 	conn := b.open()
 	defer conn.Close()
 
+	metric.BackendConnUsage.WithLabelValues("PurgeState", taskUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("PurgeState", taskUUID).Dec()
+
 	_, err := conn.Do("DEL", taskUUID)
 	if err != nil {
 		return err
@@ -224,6 +237,9 @@ func (b *Backend) PurgeGroupMeta(groupUUID string) error {
 	conn := b.open()
 	defer conn.Close()
 
+	metric.BackendConnUsage.WithLabelValues("PurgeGroupMeta", groupUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("PurgeGroupMeta", groupUUID).Dec()
+
 	_, err := conn.Do("DEL", groupUUID)
 	if err != nil {
 		return err
@@ -236,6 +252,9 @@ func (b *Backend) PurgeGroupMeta(groupUUID string) error {
 func (b *Backend) getGroupMeta(groupUUID string) (*tasks.GroupMeta, error) {
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BackendConnUsage.WithLabelValues("getGroupMeta", groupUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("getGroupMeta", groupUUID).Dec()
 
 	item, err := redis.Bytes(conn.Do("GET", groupUUID))
 	if err != nil {
@@ -258,6 +277,9 @@ func (b *Backend) getStates(taskUUIDs ...string) ([]*tasks.TaskState, error) {
 
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BackendConnUsage.WithLabelValues("getStates", taskUUIDs[0]).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("getStates", taskUUIDs[0]).Dec()
 
 	// conn.Do requires []interface{}... can't pass []string unfortunately
 	taskUUIDInterfaces := make([]interface{}, len(taskUUIDs))
@@ -295,6 +317,9 @@ func (b *Backend) updateState(taskState *tasks.TaskState) error {
 	conn := b.open()
 	defer conn.Close()
 
+	metric.BackendConnUsage.WithLabelValues("updateState", taskState.TaskUUID).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("updateState", taskState.TaskUUID).Dec()
+
 	encoded, err := json.Marshal(taskState)
 	if err != nil {
 		return err
@@ -319,6 +344,9 @@ func (b *Backend) setExpirationTime(key string) error {
 
 	conn := b.open()
 	defer conn.Close()
+
+	metric.BackendConnUsage.WithLabelValues("setExpirationTime", key).Inc()
+	defer metric.BackendConnUsage.WithLabelValues("setExpirationTime", key).Dec()
 
 	_, err := conn.Do("EXPIREAT", key, expirationTimestamp)
 	if err != nil {
