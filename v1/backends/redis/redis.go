@@ -67,17 +67,20 @@ func (b *Backend) InitGroup(groupUUID string, taskUUIDs []string) error {
 		return err
 	}
 
-	return b.setExpirationTime(groupUUID)
+	return b.setExpirationTime(conn, groupUUID)
 }
 
 // GroupCompleted returns true if all tasks in a group finished
 func (b *Backend) GroupCompleted(groupUUID string, groupTaskCount int) (bool, error) {
-	groupMeta, err := b.getGroupMeta(groupUUID)
+	conn := b.open()
+	defer conn.Close()
+
+	groupMeta, err := b.getGroupMeta(conn, groupUUID)
 	if err != nil {
 		return false, err
 	}
 
-	taskStates, err := b.getStates(groupMeta.TaskUUIDs...)
+	taskStates, err := b.getStates(conn, groupMeta.TaskUUIDs...)
 	if err != nil {
 		return false, err
 	}
@@ -94,12 +97,15 @@ func (b *Backend) GroupCompleted(groupUUID string, groupTaskCount int) (bool, er
 
 // GroupTaskStates returns states of all tasks in the group
 func (b *Backend) GroupTaskStates(groupUUID string, groupTaskCount int) ([]*tasks.TaskState, error) {
-	groupMeta, err := b.getGroupMeta(groupUUID)
+	conn := b.open()
+	defer conn.Close()
+
+	groupMeta, err := b.getGroupMeta(conn, groupUUID)
 	if err != nil {
 		return []*tasks.TaskState{}, err
 	}
 
-	return b.getStates(groupMeta.TaskUUIDs...)
+	return b.getStates(conn, groupMeta.TaskUUIDs...)
 }
 
 // TriggerChord flags chord as triggered in the backend storage to make sure
@@ -120,7 +126,7 @@ func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
 	}
 	defer m.Unlock()
 
-	groupMeta, err := b.getGroupMeta(groupUUID)
+	groupMeta, err := b.getGroupMeta(conn, groupUUID)
 	if err != nil {
 		return false, err
 	}
@@ -144,11 +150,11 @@ func (b *Backend) TriggerChord(groupUUID string) (bool, error) {
 		return false, err
 	}
 
-	return true, b.setExpirationTime(groupUUID)
+	return true, b.setExpirationTime(conn, groupUUID)
 }
 
-func (b *Backend) mergeNewTaskState(newState *tasks.TaskState) {
-	state, err := b.GetState(newState.TaskUUID)
+func (b *Backend) mergeNewTaskState(conn redis.Conn, newState *tasks.TaskState) {
+	state, err := b.getState(conn, newState.TaskUUID)
 	if err == nil {
 		newState.CreatedAt = state.CreatedAt
 		newState.TaskName = state.TaskName
@@ -157,43 +163,61 @@ func (b *Backend) mergeNewTaskState(newState *tasks.TaskState) {
 
 // SetStatePending updates task state to PENDING
 func (b *Backend) SetStatePending(signature *tasks.Signature) error {
+	conn := b.open()
+	defer conn.Close()
+
 	taskState := tasks.NewPendingTaskState(signature)
-	return b.updateState(taskState)
+	return b.updateState(conn, taskState)
 }
 
 // SetStateReceived updates task state to RECEIVED
 func (b *Backend) SetStateReceived(signature *tasks.Signature) error {
+	conn := b.open()
+	defer conn.Close()
+
 	taskState := tasks.NewReceivedTaskState(signature)
-	b.mergeNewTaskState(taskState)
-	return b.updateState(taskState)
+	b.mergeNewTaskState(conn, taskState)
+	return b.updateState(conn, taskState)
 }
 
 // SetStateStarted updates task state to STARTED
 func (b *Backend) SetStateStarted(signature *tasks.Signature) error {
+	conn := b.open()
+	defer conn.Close()
+
 	taskState := tasks.NewStartedTaskState(signature)
-	b.mergeNewTaskState(taskState)
-	return b.updateState(taskState)
+	b.mergeNewTaskState(conn, taskState)
+	return b.updateState(conn, taskState)
 }
 
 // SetStateRetry updates task state to RETRY
 func (b *Backend) SetStateRetry(signature *tasks.Signature) error {
+	conn := b.open()
+	defer conn.Close()
+
 	taskState := tasks.NewRetryTaskState(signature)
-	b.mergeNewTaskState(taskState)
-	return b.updateState(taskState)
+	b.mergeNewTaskState(conn, taskState)
+	return b.updateState(conn, taskState)
 }
 
 // SetStateSuccess updates task state to SUCCESS
 func (b *Backend) SetStateSuccess(signature *tasks.Signature, results []*tasks.TaskResult) error {
+	conn := b.open()
+	defer conn.Close()
+
 	taskState := tasks.NewSuccessTaskState(signature, results)
-	b.mergeNewTaskState(taskState)
-	return b.updateState(taskState)
+	b.mergeNewTaskState(conn, taskState)
+	return b.updateState(conn, taskState)
 }
 
 // SetStateFailure updates task state to FAILURE
 func (b *Backend) SetStateFailure(signature *tasks.Signature, err string) error {
+	conn := b.open()
+	defer conn.Close()
+
 	taskState := tasks.NewFailureTaskState(signature, err)
-	b.mergeNewTaskState(taskState)
-	return b.updateState(taskState)
+	b.mergeNewTaskState(conn, taskState)
+	return b.updateState(conn, taskState)
 }
 
 // GetState returns the latest task state
@@ -201,6 +225,10 @@ func (b *Backend) GetState(taskUUID string) (*tasks.TaskState, error) {
 	conn := b.open()
 	defer conn.Close()
 
+	return b.getState(conn, taskUUID)
+}
+
+func (b *Backend) getState(conn redis.Conn, taskUUID string) (*tasks.TaskState, error) {
 	metric.BackendConnUsage.WithLabelValues("GetState", taskUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("GetState", taskUUID).Dec()
 	defer metric.BackendConnUsage.DeleteLabelValues("GetState", taskUUID)
@@ -254,10 +282,7 @@ func (b *Backend) PurgeGroupMeta(groupUUID string) error {
 }
 
 // getGroupMeta retrieves group meta data, convenience function to avoid repetition
-func (b *Backend) getGroupMeta(groupUUID string) (*tasks.GroupMeta, error) {
-	conn := b.open()
-	defer conn.Close()
-
+func (b *Backend) getGroupMeta(conn redis.Conn, groupUUID string) (*tasks.GroupMeta, error) {
 	metric.BackendConnUsage.WithLabelValues("getGroupMeta", groupUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("getGroupMeta", groupUUID).Dec()
 	defer metric.BackendConnUsage.DeleteLabelValues("getGroupMeta", groupUUID)
@@ -278,11 +303,8 @@ func (b *Backend) getGroupMeta(groupUUID string) (*tasks.GroupMeta, error) {
 }
 
 // getStates returns multiple task states
-func (b *Backend) getStates(taskUUIDs ...string) ([]*tasks.TaskState, error) {
+func (b *Backend) getStates(conn redis.Conn, taskUUIDs ...string) ([]*tasks.TaskState, error) {
 	taskStates := make([]*tasks.TaskState, len(taskUUIDs))
-
-	conn := b.open()
-	defer conn.Close()
 
 	metric.BackendConnUsage.WithLabelValues("getStates", taskUUIDs[0]).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("getStates", taskUUIDs[0]).Dec()
@@ -320,10 +342,7 @@ func (b *Backend) getStates(taskUUIDs ...string) ([]*tasks.TaskState, error) {
 }
 
 // updateState saves current task state
-func (b *Backend) updateState(taskState *tasks.TaskState) error {
-	conn := b.open()
-	defer conn.Close()
-
+func (b *Backend) updateState(conn redis.Conn, taskState *tasks.TaskState) error {
 	metric.BackendConnUsage.WithLabelValues("updateState", taskState.TaskUUID).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("updateState", taskState.TaskUUID).Dec()
 	defer metric.BackendConnUsage.DeleteLabelValues("updateState", taskState.TaskUUID)
@@ -338,20 +357,17 @@ func (b *Backend) updateState(taskState *tasks.TaskState) error {
 		return err
 	}
 
-	return b.setExpirationTime(taskState.TaskUUID)
+	return b.setExpirationTime(conn, taskState.TaskUUID)
 }
 
 // setExpirationTime sets expiration timestamp on a stored task state
-func (b *Backend) setExpirationTime(key string) error {
+func (b *Backend) setExpirationTime(conn redis.Conn, key string) error {
 	expiresIn := b.GetConfig().ResultsExpireIn
 	if expiresIn == 0 {
 		// // expire results after 1 hour by default
 		expiresIn = config.DefaultResultsExpireIn
 	}
 	expirationTimestamp := int32(time.Now().Unix() + int64(expiresIn))
-
-	conn := b.open()
-	defer conn.Close()
 
 	metric.BackendConnUsage.WithLabelValues("setExpirationTime", key).Inc()
 	defer metric.BackendConnUsage.WithLabelValues("setExpirationTime", key).Dec()
