@@ -64,11 +64,6 @@ func newBroker() (iface.Broker, error) {
 	}
 	backend := New(
 		cnf,
-		"localhost",
-		user,
-		pass,
-		authDB,
-		databaseMachinery,
 	)
 	return backend, nil
 }

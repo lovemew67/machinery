@@ -14,6 +14,7 @@ import (
 	eagerbroker "github.com/RichardKnop/machinery/v1/brokers/eager"
 	gcppubsubbroker "github.com/RichardKnop/machinery/v1/brokers/gcppubsub"
 	brokeriface "github.com/RichardKnop/machinery/v1/brokers/iface"
+	mongobroker "github.com/RichardKnop/machinery/v1/brokers/mongo"
 	redisbroker "github.com/RichardKnop/machinery/v1/brokers/redis"
 	sqsbroker "github.com/RichardKnop/machinery/v1/brokers/sqs"
 
@@ -30,6 +31,11 @@ import (
 // BrokerFactory creates a new object of iface.Broker
 // Currently only AMQP/S broker is supported
 func BrokerFactory(cnf *config.Config) (brokeriface.Broker, error) {
+	if strings.HasPrefix(cnf.ResultBackend, "mongodb://") ||
+		strings.HasPrefix(cnf.ResultBackend, "mongodb+srv://") {
+		return mongobroker.New(cnf), nil
+	}
+
 	if strings.HasPrefix(cnf.Broker, "amqp://") {
 		return amqpbroker.New(cnf), nil
 	}

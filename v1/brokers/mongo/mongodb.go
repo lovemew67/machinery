@@ -14,7 +14,6 @@ import (
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/log"
 	"github.com/RichardKnop/machinery/v1/tasks"
-	"gitlab.com/hk-backend/m800-provisioning-service/api/middleware"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -331,17 +330,72 @@ func (b *Broker) nextDelayedTask() (result *tasks.Signature, err error) {
 	if err != nil {
 		return
 	}
-	result = middleware.Signature
+	result = middleResult.Signature
 	return
 }
 
 // consume takes delivered messages from the channel and manages a worker pool
 // to process tasks concurrently
 func (b *Broker) consume(deliveries <-chan *tasks.Signature, concurrency int, taskProcessor iface.TaskProcessor) (err error) {
+	errorsChan := make(chan error, concurrency*2)
+	pool := make(chan struct{}, concurrency)
+
+	// init pool for Worker tasks execution, as many slots as Worker concurrency param
+	go func() {
+		for i := 0; i < concurrency; i++ {
+			pool <- struct{}{}
+		}
+	}()
+
+	for {
+		select {
+		case err := <-errorsChan:
+			return err
+		case d, open := <-deliveries:
+			if !open {
+				return nil
+			}
+			if concurrency > 0 {
+				// get execution slot from pool (blocks until one is available)
+				<-pool
+			}
+
+			b.processingWG.Add(1)
+
+			// Consume the task inside a goroutine so multiple tasks
+			// can be processed concurrently
+			go func() {
+				if err := b.consumeOne(d, taskProcessor); err != nil {
+					errorsChan <- err
+				}
+
+				b.processingWG.Done()
+
+				if concurrency > 0 {
+					// give slot back to pool
+					pool <- struct{}{}
+				}
+			}()
+		}
+	}
 	return
 }
 
 // consumeOne processes a single message using TaskProcessor
-func (b *Broker) consumeOne(delivery *tasks.Signature, taskProcessor iface.TaskProcessor) (err error) {
-	return
+func (b *Broker) consumeOne(signature *tasks.Signature, taskProcessor iface.TaskProcessor) (err error) {
+	// If the task is not registered, we requeue it,
+	// there might be different workers for processing specific tasks
+	if !b.IsTaskRegistered(signature.Name) {
+		if signature.IgnoreWhenTaskNotRegistered {
+			return nil
+		}
+		log.INFO.Printf("Task not registered with this worker. Requeing message: %s", signature)
+
+		// TODO: requeue signature
+		return nil
+	}
+
+	log.DEBUG.Printf("Received new message: %s", signature)
+
+	return taskProcessor.Process(signature)
 }

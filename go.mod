@@ -1,5 +1,7 @@
 module github.com/RichardKnop/machinery
 
+go 1.13
+
 require (
 	cloud.google.com/go v0.53.0 // indirect
 	cloud.google.com/go/pubsub v1.2.0
@@ -45,5 +47,3 @@ require (
 )
 
 replace git.apache.org/thrift.git => github.com/apache/thrift v0.0.0-20180902110319-2566ecd5d999
-
-go 1.13
