@@ -1,7 +1,6 @@
 package mongo
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,22 +13,15 @@ import (
 	"github.com/RichardKnop/machinery/v1/common"
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/log"
-	"github.com/RichardKnop/machinery/v1/metric"
 	"github.com/RichardKnop/machinery/v1/tasks"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"gopkg.in/mgo.v2/bson"
 )
 
 // Broker represents a Redis broker
 type Broker struct {
 	common.Broker
-
-	host     string
-	username string
-	password string
-	authDB   string
-	database string
 
 	consumingWG  sync.WaitGroup // wait group to make sure whole consumption completes
 	processingWG sync.WaitGroup // use wait group to make sure task processing completes
@@ -42,13 +34,8 @@ type Broker struct {
 }
 
 // New creates new Broker instance
-func New(cnf *config.Config, host, username, password, authDB, database string) iface.Broker {
+func New(cnf *config.Config) iface.Broker {
 	b := &Broker{Broker: common.NewBroker(cnf)}
-	b.host = host
-	b.username = username
-	b.password = password
-	b.authDB = authDB
-	b.database = database
 	b.once = sync.Once{}
 	return b
 }
@@ -64,12 +51,8 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 
 	b.Broker.StartConsuming(consumerTag, concurrency, taskProcessor)
 
-	metric.BrokerConnUsage.WithLabelValues("StartConsuming", consumerTag).Inc()
-	defer metric.BrokerConnUsage.WithLabelValues("StartConsuming", consumerTag).Dec()
-	defer metric.BrokerConnUsage.DeleteLabelValues("StartConsuming", consumerTag)
-
 	// Connect the server to make sure connection is live
-	err = b.connectActively()
+	err = b.connectOnce()
 	if err != nil {
 		b.GetRetryFunc()(b.GetRetryStopChan())
 
@@ -84,7 +67,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 	}
 
 	// Channel to which we will push tasks ready for processing by worker
-	deliveries := make(chan []byte, concurrency)
+	deliveries := make(chan *tasks.Signature, concurrency)
 	pool := make(chan struct{}, concurrency)
 
 	// initialize worker pool with maxWorkers workers
@@ -96,9 +79,7 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 	// If the message is valid and can be unmarshaled into a proper structure
 	// we send it to the deliveries channel
 	go func() {
-
 		log.INFO.Print("[*] Waiting for messages. To exit press CTRL+C")
-
 		for {
 			select {
 			// A way to stop this goroutine from b.StopConsuming
@@ -107,42 +88,37 @@ func (b *Broker) StartConsuming(consumerTag string, concurrency int, taskProcess
 				return
 			case <-pool:
 				if taskProcessor.PreConsumeHandler() {
-					task, _ := b.nextTask("default")
-					if len(task) > 0 {
-						deliveries <- task
+					task, err := b.nextTask()
+					if err != nil {
+						continue
 					}
+					deliveries <- task
 				}
-
 				pool <- struct{}{}
 			}
 		}
 	}()
+
+	// Prevent too much pressure on mongo
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
 	// A goroutine to watch for delayed tasks and push them to deliveries
 	// channel for consumption by the worker
 	b.delayedWG.Add(1)
 	go func() {
 		defer b.delayedWG.Done()
-
 		for {
 			select {
 			// A way to stop this goroutine from b.StopConsuming
 			case <-b.GetStopChan():
 				return
-			default:
-				task, err := b.nextDelayedTask("default")
+			case <-ticker.C:
+				signature, err := b.nextDelayedTask()
 				if err != nil {
 					continue
 				}
-
-				signature := new(tasks.Signature)
-				decoder := json.NewDecoder(bytes.NewReader(task))
-				decoder.UseNumber()
-				if err := decoder.Decode(signature); err != nil {
-					log.ERROR.Print(errs.NewErrCouldNotUnmarshaTaskSignature(task, err))
-				}
-
-				if err := b.Publish(context.Background(), signature); err != nil {
+				if err := b.Publish(ctx, signature); err != nil {
 					log.ERROR.Print(err)
 				}
 			}
@@ -177,38 +153,35 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) (err e
 	}
 	log.INFO.Printf("%+v\n", msg)
 
-	err = b.connectActively()
+	err = b.connectOnce()
 	if err != nil {
 		return fmt.Errorf("failed to connect to mongo: %s", err)
 	}
-
-	metric.BrokerConnUsage.WithLabelValues("Publish", signature.UUID).Inc()
-	defer metric.BrokerConnUsage.WithLabelValues("Publish", signature.UUID).Dec()
-	defer metric.BrokerConnUsage.DeleteLabelValues("Publish", signature.UUID)
 
 	// Check the ETA signature field, if it is set and it is in the future,
 	// delay the task
 	if signature.ETA != nil {
 		now := time.Now().UTC()
-
 		if signature.ETA.After(now) {
 			// score := signature.ETA.UnixNano()
 			// TODO: insert delayed task
-			// _, err = conn.Do("ZADD", redisDelayedTasksKey, score, msg)
 			return
 		}
 	}
 
 	// TODO: insert pending task
-	// _, err = conn.Do("RPUSH", signature.RoutingKey, msg)
 	return
 }
 
+// TODO: add paging
 // GetPendingTasks returns a slice of task signatures waiting in the queue
 func (b *Broker) GetPendingTasks(queue string) (results []*tasks.Signature, err error) {
 	results = []*tasks.Signature{}
-	ctx := context.Background()
-	cursor, err := b.pendingTasksCollection().Find(ctx, bson.M{})
+	collection, err := b.pendingTasksCollection()
+	if err != nil {
+		return
+	}
+	cursor, err := collection.Find(ctx, bson.M{})
 	if err != nil {
 		return
 	}
@@ -216,11 +189,15 @@ func (b *Broker) GetPendingTasks(queue string) (results []*tasks.Signature, err 
 	return
 }
 
+// TODO: add paging
 // GetDelayedTasks returns a slice of task signatures that are scheduled, but not yet in the queue
 func (b *Broker) GetDelayedTasks() (results []*tasks.Signature, err error) {
 	results = []*tasks.Signature{}
-	ctx := context.Background()
-	cursor, err := b.delayedTasksCollection().Find(ctx, bson.M{})
+	collection, err := b.delayedTasksCollection()
+	if err != nil {
+		return
+	}
+	cursor, err := collection.Find(ctx, bson.M{})
 	if err != nil {
 		return
 	}
@@ -228,21 +205,25 @@ func (b *Broker) GetDelayedTasks() (results []*tasks.Signature, err error) {
 	return
 }
 
-func (b *Broker) delayedTasksCollection() *mongo.Collection {
-	b.once.Do(func() {
-		_ = b.connect()
-	})
-	return b.dtc
+func (b *Broker) delayedTasksCollection() (result *mongo.Collection, err error) {
+	err = b.connectOnce()
+	if err != nil {
+		return
+	}
+	result = b.dtc
+	return
 }
 
-func (b *Broker) pendingTasksCollection() *mongo.Collection {
-	b.once.Do(func() {
-		_ = b.connect()
-	})
-	return b.ptc
+func (b *Broker) pendingTasksCollection() (result *mongo.Collection, err error) {
+	err = b.connectOnce()
+	if err != nil {
+		return
+	}
+	result = b.ptc
+	return
 }
 
-func (b *Broker) connectActively() (err error) {
+func (b *Broker) connectOnce() (err error) {
 	b.once.Do(func() {
 		err = b.connect()
 	})
@@ -287,36 +268,37 @@ func (b *Broker) dial() (client *mongo.Client, err error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	cancelCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	err = client.Connect(ctx)
+	err = client.Connect(cancelCtx)
 	return
 }
 
+// TODO: add proper index
 // createMongoIndexes ensures all indexes are in place
 func (b *Broker) createMongoIndexes(database string) (err error) {
 	return
 }
 
 // nextTask pops next available task from the default queue
-func (b *Broker) nextTask(queue string) (result []byte, err error) {
+func (b *Broker) nextTask() (result *tasks.Signature, err error) {
 	return
 }
 
 // nextDelayedTask pops a value from the ZSET key using WATCH/MULTI/EXEC commands.
 // https://github.com/gomodule/redigo/blob/master/redis/zpop_example_test.go
-func (b *Broker) nextDelayedTask(key string) (result []byte, err error) {
+func (b *Broker) nextDelayedTask() (result *tasks.Signature, err error) {
 	return
 }
 
 // consume takes delivered messages from the channel and manages a worker pool
 // to process tasks concurrently
-func (b *Broker) consume(deliveries <-chan []byte, concurrency int, taskProcessor iface.TaskProcessor) (err error) {
+func (b *Broker) consume(deliveries <-chan *tasks.Signature, concurrency int, taskProcessor iface.TaskProcessor) (err error) {
 	return
 }
 
 // consumeOne processes a single message using TaskProcessor
-func (b *Broker) consumeOne(delivery []byte, taskProcessor iface.TaskProcessor) (err error) {
+func (b *Broker) consumeOne(delivery *tasks.Signature, taskProcessor iface.TaskProcessor) (err error) {
 	return
 }
