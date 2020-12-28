@@ -33,7 +33,7 @@ type Backend struct {
 func New(cnf *config.Config) (iface.Backend, error) {
 	backend := &Backend{
 		Backend: common.NewBackend(cnf),
-		once: sync.Once{},
+		once:    sync.Once{},
 	}
 
 	return backend, nil
@@ -288,14 +288,13 @@ func (b *Backend) connect() error {
 	}
 	b.client = client
 
-	database := "machinery"
-
+	database := databaseMachinery
 	if b.GetConfig().MongoDB != nil {
 		database = b.GetConfig().MongoDB.Database
 	}
 
-	b.tc = b.client.Database(database).Collection("tasks")
-	b.gmc = b.client.Database(database).Collection("group_metas")
+	b.tc = b.client.Database(database).Collection(collectionTaskResults)
+	b.gmc = b.client.Database(database).Collection(collectionGroupMetas)
 
 	err = b.createMongoIndexes(database)
 	if err != nil {
@@ -313,8 +312,7 @@ func (b *Backend) dial() (*mongo.Client, error) {
 	}
 
 	uri := b.GetConfig().ResultBackend
-	if strings.HasPrefix(uri, "mongodb://") == false &&
-		strings.HasPrefix(uri, "mongodb+srv://") == false {
+	if !strings.HasPrefix(uri, "mongodb://") && !strings.HasPrefix(uri, "mongodb+srv://") {
 		uri = fmt.Sprintf("mongodb://%s", uri)
 	}
 
@@ -336,7 +334,7 @@ func (b *Backend) dial() (*mongo.Client, error) {
 // createMongoIndexes ensures all indexes are in place
 func (b *Backend) createMongoIndexes(database string) error {
 
-	tasksCollection := b.client.Database(database).Collection("tasks")
+	tasksCollection := b.client.Database(database).Collection(collectionTaskResults)
 
 	expireIn := int32(b.GetConfig().ResultsExpireIn)
 
