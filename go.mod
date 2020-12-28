@@ -17,6 +17,7 @@ require (
 	github.com/onsi/ginkgo v1.10.0 // indirect
 	github.com/onsi/gomega v1.7.0 // indirect
 	github.com/opentracing/opentracing-go v1.1.0
+	github.com/ory/dockertest/v3 v3.6.3
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.2.1
 	github.com/streadway/amqp v0.0.0-20200108173154-1c71cc93ed71
@@ -29,7 +30,6 @@ require (
 	golang.org/x/exp v0.0.0-20200228211341-fcea875c7e85 // indirect
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect
 	golang.org/x/net v0.0.0-20200301022130-244492dfa37a // indirect
-	golang.org/x/sys v0.0.0-20200302150141-5c8b2ff67527 // indirect
 	golang.org/x/tools v0.0.0-20200303165918-5bcca83a7881 // indirect
 	google.golang.org/api v0.19.0 // indirect
 	google.golang.org/genproto v0.0.0-20200303153909-beee998c1893 // indirect
