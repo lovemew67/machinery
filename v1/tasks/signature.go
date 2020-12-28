@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Arg represents a single argument passed to invocation fo a task
@@ -42,21 +43,22 @@ func (h Headers) ForeachKey(handler func(key, val string) error) error {
 
 // Signature represents a single task invocation
 type Signature struct {
-	UUID           string       `bson:"uuid,omitempty"`
-	Name           string       `bson:"name,omitempty"`
-	RoutingKey     string       `bson:"routing_key,omitempty"`
-	ETA            *time.Time   `bson:"eta,omitempty"`
-	GroupUUID      string       `bson:"group_uuid,omitempty"`
-	GroupTaskCount int          `bson:"group_task_count"`
-	Args           []Arg        `bson:"args,omitempty"`
-	Headers        Headers      `bson:"headers,omitempty"`
-	Priority       uint8        `bson:"priority"`
-	Immutable      bool         `bson:"immutable"`
-	RetryCount     int          `bson:"retry_count"`
-	RetryTimeout   int          `bson:"retry_timeout"`
-	OnSuccess      []*Signature `bson:"on_success,omitempty"`
-	OnError        []*Signature `bson:"on_error,omitempty"`
-	ChordCallback  *Signature   `bson:"chord_callback,omitempty"`
+	MongoID        primitive.ObjectID `bson:"_id,omitempty"`
+	UUID           string             `bson:"uuid,omitempty"`
+	Name           string             `bson:"name,omitempty"`
+	RoutingKey     string             `bson:"routing_key,omitempty"`
+	ETA            *time.Time         `bson:"eta,omitempty"`
+	GroupUUID      string             `bson:"group_uuid,omitempty"`
+	GroupTaskCount int                `bson:"group_task_count"`
+	Args           []Arg              `bson:"args,omitempty"`
+	Headers        Headers            `bson:"headers,omitempty"`
+	Priority       uint8              `bson:"priority"`
+	Immutable      bool               `bson:"immutable"`
+	RetryCount     int                `bson:"retry_count"`
+	RetryTimeout   int                `bson:"retry_timeout"`
+	OnSuccess      []*Signature       `bson:"on_success,omitempty"`
+	OnError        []*Signature       `bson:"on_error,omitempty"`
+	ChordCallback  *Signature         `bson:"chord_callback,omitempty"`
 	//MessageGroupId for Broker, e.g. SQS
 	BrokerMessageGroupId string `bson:"broker_message_group_id,omitempty"`
 	//ReceiptHandle of SQS Message

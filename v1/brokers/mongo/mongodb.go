@@ -14,6 +14,7 @@ import (
 	"github.com/RichardKnop/machinery/v1/config"
 	"github.com/RichardKnop/machinery/v1/log"
 	"github.com/RichardKnop/machinery/v1/tasks"
+	"gitlab.com/hk-backend/m800-provisioning-service/api/middleware"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -163,13 +164,25 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) (err e
 	if signature.ETA != nil {
 		now := time.Now().UTC()
 		if signature.ETA.After(now) {
-			// score := signature.ETA.UnixNano()
-			// TODO: insert delayed task
+			score := signature.ETA.UnixNano()
+			var collection *mongo.Collection
+			collection, err = b.delayedTasksCollection()
+			if err != nil {
+				return
+			}
+			_, err = collection.InsertOne(ctx, signatureWithScore{
+				Signature: signature,
+				Score:     score,
+			})
 			return
 		}
 	}
 
-	// TODO: insert pending task
+	collection, err := b.pendingTasksCollection()
+	if err != nil {
+		return
+	}
+	_, err = collection.InsertOne(ctx, signature)
 	return
 }
 
@@ -177,6 +190,7 @@ func (b *Broker) Publish(ctx context.Context, signature *tasks.Signature) (err e
 // GetPendingTasks returns a slice of task signatures waiting in the queue
 func (b *Broker) GetPendingTasks(queue string) (results []*tasks.Signature, err error) {
 	results = []*tasks.Signature{}
+	middleResults := []signatureWithScore{}
 	collection, err := b.pendingTasksCollection()
 	if err != nil {
 		return
@@ -185,7 +199,13 @@ func (b *Broker) GetPendingTasks(queue string) (results []*tasks.Signature, err 
 	if err != nil {
 		return
 	}
-	err = cursor.All(ctx, &results)
+	err = cursor.All(ctx, &middleResults)
+	if err != nil {
+		return
+	}
+	for index := range middleResults {
+		results = append(results, middleResults[index].Signature)
+	}
 	return
 }
 
@@ -283,12 +303,35 @@ func (b *Broker) createMongoIndexes(database string) (err error) {
 
 // nextTask pops next available task from the default queue
 func (b *Broker) nextTask() (result *tasks.Signature, err error) {
+	result = &tasks.Signature{}
+	collection, err := b.pendingTasksCollection()
+	if err != nil {
+		return
+	}
+	err = collection.FindOne(ctx, bson.M{}).Decode(result)
 	return
 }
 
 // nextDelayedTask pops a value from the ZSET key using WATCH/MULTI/EXEC commands.
 // https://github.com/gomodule/redigo/blob/master/redis/zpop_example_test.go
 func (b *Broker) nextDelayedTask() (result *tasks.Signature, err error) {
+	middleResult := &signatureWithScore{}
+	collection, err := b.delayedTasksCollection()
+	if err != nil {
+		return
+	}
+	findOneOpt := options.FindOne()
+	findOneOpt.SetSort(bson.D{
+		bson.E{
+			Key:   "score",
+			Value: 1,
+		},
+	})
+	err = collection.FindOne(ctx, bson.M{}, findOneOpt).Decode(middleResult)
+	if err != nil {
+		return
+	}
+	result = middleware.Signature
 	return
 }
 

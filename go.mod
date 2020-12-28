@@ -32,6 +32,7 @@ require (
 	github.com/xdg/stringprep v1.0.0 // indirect
 	gitlab.com/cake/data-retention v0.0.91
 	gitlab.com/cake/mgopool v1.5.5
+	gitlab.com/hk-backend/m800-provisioning-service v1.2.1
 	go.mongodb.org/mongo-driver v1.4.3
 	golang.org/x/exp v0.0.0-20200228211341-fcea875c7e85 // indirect
 	golang.org/x/lint v0.0.0-20200302205851-738671d3881b // indirect

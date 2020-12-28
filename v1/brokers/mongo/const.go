@@ -19,8 +19,8 @@ var (
 	ctx = context.Background()
 )
 
-type SignatureWithScore struct {
-	tasks.Signature
+type signatureWithScore struct {
+	*tasks.Signature
 
 	// mimic redis's behavior
 	Score int64 `bson:"score"`
